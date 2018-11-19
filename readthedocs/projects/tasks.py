@@ -218,10 +218,24 @@ class SyncRepositoryTaskStep(SyncRepositoryMixin):
         except RepositoryError:
             # Do not log as ERROR handled exceptions
             log.warning('There was an error with the repository', exc_info=True)
+        except vcs_support_utils.LockTimeout:
+            log.info(
+                'Lock still active: project=%s version=%s',
+                self.project.slug,
+                self.version.slug,
+            )
         except Exception:
             # Catch unhandled errors when syncing
             log.exception(
                 'An unhandled exception was raised during VCS syncing',
+                extra={
+                    'stack': True,
+                    'tags': {
+                        'project': self.project.slug,
+                        'version': self.version.slug,
+                    },
+                },
+
             )
         return False
 
@@ -405,8 +419,10 @@ class UpdateDocsTaskStep(SyncRepositoryMixin):
                 raise YAMLParseError(
                     YAMLParseError.GENERIC_WITH_PARSE_EXCEPTION.format(
                         exception=str(e),
-                    ))
+                    )
+                )
 
+            self.save_build_config()
             self.additional_vcs_operations()
 
         if self.setup_env.failure or self.config is None:
@@ -530,9 +546,14 @@ class UpdateDocsTaskStep(SyncRepositoryMixin):
         build = {}
         if build_pk:
             build = api_v2.build(build_pk).get()
-        return dict((key, val) for (key, val) in list(build.items())
-                    if key not in ['project', 'version', 'resource_uri',
-                                   'absolute_uri'])
+        private_keys = [
+            'project', 'version', 'resource_uri', 'absolute_uri',
+        ]
+        return {
+            key: val
+            for key, val in build.items()
+            if key not in private_keys
+        }
 
     def setup_vcs(self):
         """
@@ -549,7 +570,31 @@ class UpdateDocsTaskStep(SyncRepositoryMixin):
             version=self.version.slug,
             msg='Updating docs from VCS',
         ))
-        self.sync_repo()
+        try:
+            self.sync_repo()
+        except RepositoryError:
+            # Do not log as ERROR handled exceptions
+            log.warning('There was an error with the repository', exc_info=True)
+        except vcs_support_utils.LockTimeout:
+            log.info(
+                'Lock still active: project=%s version=%s',
+                self.project.slug,
+                self.version.slug,
+            )
+        except Exception:
+            # Catch unhandled errors when syncing
+            log.exception(
+                'An unhandled exception was raised during VCS syncing',
+                extra={
+                    'stack': True,
+                    'tags': {
+                        'build': self.build['id'],
+                        'project': self.project.slug,
+                        'version': self.version.slug,
+                    },
+                },
+            )
+
         commit = self.project.vcs_repo(self.version.slug).commit
         if commit:
             self.build['commit'] = commit
@@ -559,7 +604,7 @@ class UpdateDocsTaskStep(SyncRepositoryMixin):
         env = {
             'READTHEDOCS': True,
             'READTHEDOCS_VERSION': self.version.slug,
-            'READTHEDOCS_PROJECT': self.project.slug
+            'READTHEDOCS_PROJECT': self.project.slug,
         }
 
         if self.config.conda is not None:
@@ -570,7 +615,7 @@ class UpdateDocsTaskStep(SyncRepositoryMixin):
                     self.project.doc_path,
                     'conda',
                     self.version.slug,
-                    'bin'
+                    'bin',
                 ),
             })
         else:
@@ -579,9 +624,12 @@ class UpdateDocsTaskStep(SyncRepositoryMixin):
                     self.project.doc_path,
                     'envs',
                     self.version.slug,
-                    'bin'
+                    'bin',
                 ),
             })
+
+        # Update environment from Project's specific environment variables
+        env.update(self.project.environment_variables)
 
         return env
 
@@ -592,6 +640,15 @@ class UpdateDocsTaskStep(SyncRepositoryMixin):
         api_v2.project(self.project.pk).put(project_data)
         self.project.has_valid_clone = True
         self.version.project.has_valid_clone = True
+
+    def save_build_config(self):
+        """Save config in the build object."""
+        pk = self.build['id']
+        config = self.config.as_dict()
+        api_v2.build(pk).patch({
+            'config': config,
+        })
+        self.build['config'] = config
 
     def update_app_instances(self, html=False, localmedia=False, search=False,
                              pdf=False, epub=False):

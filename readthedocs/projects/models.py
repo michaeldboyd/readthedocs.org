@@ -17,6 +17,7 @@ from django.utils import timezone
 from django.utils.encoding import python_2_unicode_compatible
 from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
+from django_extensions.db.models import TimeStampedModel
 from future.backports.urllib.parse import urlparse  # noqa
 from guardian.shortcuts import assign
 from taggit.managers import TaggableManager
@@ -328,9 +329,9 @@ class Project(models.Model):
         for owner in self.users.all():
             assign('view_project', owner, self)
         try:
-            latest = self.versions.get(slug=LATEST)
+            latest = self.versions.filter(slug=LATEST).first()
             default_branch = self.get_default_branch()
-            if latest.identifier != default_branch:
+            if latest and latest.identifier != default_branch:
                 latest.identifier = default_branch
                 latest.save()
         except Exception:
@@ -873,12 +874,26 @@ class Project(models.Model):
         """
         Whether this project is ad-free
 
-        :return: ``True`` if advertising should be shown and ``False`` otherwise
+        :returns: ``True`` if advertising should be shown and ``False`` otherwise
+        :rtype: bool
         """
         if self.ad_free or self.gold_owners.exists():
             return False
 
         return True
+
+    @property
+    def environment_variables(self):
+        """
+        Environment variables to build this particular project.
+
+        :returns: dictionary with all the variables {name: value}
+        :rtype: dict
+        """
+        return {
+            variable.name: variable.value
+            for variable in self.environmentvariable_set.all()
+        }
 
 
 class APIProject(Project):
@@ -903,6 +918,7 @@ class APIProject(Project):
 
     def __init__(self, *args, **kwargs):
         self.features = kwargs.pop('features', [])
+        environment_variables = kwargs.pop('environment_variables', {})
         ad_free = (not kwargs.pop('show_advertising', True))
         # These fields only exist on the API return, not on the model, so we'll
         # remove them to avoid throwing exceptions due to unexpected fields
@@ -916,6 +932,7 @@ class APIProject(Project):
 
         # Overwrite the database property with the value from the API
         self.ad_free = ad_free
+        self._environment_variables = environment_variables
 
     def save(self, *args, **kwargs):
         return 0
@@ -927,6 +944,10 @@ class APIProject(Project):
     def show_advertising(self):
         """Whether this project is ad-free (don't access the database)"""
         return not self.ad_free
+
+    @property
+    def environment_variables(self):
+        return self._environment_variables
 
 
 @python_2_unicode_compatible
@@ -1020,7 +1041,7 @@ class EmailHook(Notification):
 
 @python_2_unicode_compatible
 class WebHook(Notification):
-    url = models.URLField(blank=True,
+    url = models.URLField(max_length=600, blank=True,
                           help_text=_('URL to send the webhook to'))
 
     def __str__(self):
@@ -1157,3 +1178,19 @@ class Feature(models.Model):
         implement this behavior.
         """
         return dict(self.FEATURES).get(self.feature_id, self.feature_id)
+
+
+class EnvironmentVariable(TimeStampedModel, models.Model):
+    name = models.CharField(
+        max_length=128,
+        help_text=_('Name of the environment variable'),
+    )
+    value = models.CharField(
+        max_length=256,
+        help_text=_('Value of the environment variable'),
+    )
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        help_text=_('Project where this variable will be used'),
+    )
