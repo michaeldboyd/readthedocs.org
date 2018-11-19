@@ -93,6 +93,7 @@ def log_info(project, msg):
                      msg=msg))
 
 
+@notify_deprecated_endpoint
 def _build_url(url, projects, branches):
     """
     Map a URL onto specific projects to build that are linked to that URL.
@@ -142,7 +143,6 @@ def _build_url(url, projects, branches):
 
 
 @csrf_exempt
-@notify_deprecated_endpoint
 def github_build(request):  # noqa: D205
     """
     GitHub webhook consumer.
@@ -198,7 +198,6 @@ def github_build(request):  # noqa: D205
 
 
 @csrf_exempt
-@notify_deprecated_endpoint
 def gitlab_build(request):  # noqa: D205
     """
     GitLab webhook consumer.
@@ -234,7 +233,6 @@ def gitlab_build(request):  # noqa: D205
 
 
 @csrf_exempt
-@notify_deprecated_endpoint
 def bitbucket_build(request):
     """
     Consume webhooks from multiple versions of Bitbucket's API.
