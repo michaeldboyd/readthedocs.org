@@ -352,12 +352,12 @@ class CommunityBaseSettings(Settings):
         'page': {
             'name': 'page_index',
             'settings': {
-                # We have 3 nodes, therefore having 3 shards and each one having 3 replica
+                # We have 3 nodes, therefore having 3 shards and each one having 2 replicas
                 # will be good fit for our infrastructure. So all the 9(3*3) shards will be
                 # allocated to 3 nodes. Therefore, if one nodes get failed, the data will be
                 # inside other nodes and Elasticsearch can serve properly.
                 'number_of_shards': 3,
-                'number_of_replicas': 3,
+                'number_of_replicas': 2,
                 "index": {
                     "sort.field": ["project", "version"]
                 }
