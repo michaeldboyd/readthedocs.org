@@ -172,6 +172,12 @@ class BaseSphinx(BaseBuilder):
                 self.config_file or
                 self.project.conf_file(self.version.slug)
             )
+            # Prepend line that sets the readthedocs env variable to false
+            with open(self.config_file, mode="r") as orig:
+                data = orig.read().splitlines(True)
+            with open(self.config_file, mode="w") as prep:
+                prep.write("import os \nos.environ['READTHEDOCS']='False'\n")
+                prep.writelines(data[1:])
             outfile = codecs.open(self.config_file, encoding='utf-8', mode='a')
         except (ProjectConfigurationError, IOError):
             trace = sys.exc_info()[2]
